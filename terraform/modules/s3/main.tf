@@ -1,0 +1,117 @@
+# S3 Bucket
+resource "aws_s3_bucket" "bucket" {
+  bucket        = var.bucket_name
+  force_destroy = var.force_destroy
+  tags = merge(
+    {
+      Name = var.bucket_name
+    },
+    var.tags
+  )
+}
+
+# Creating object
+resource "aws_s3_object" "object" {
+  count                  = length(var.objects)
+  bucket                 = aws_s3_bucket.bucket.id
+  source                 = var.objects[count.index].source
+  key                    = var.objects[count.index].key
+  etag                   = filemd5(var.objects[count.index].source)
+  server_side_encryption = var.kms_key_arn != null ? "aws:kms" : "AES256"
+  kms_key_id             = var.kms_key_arn
+}
+
+# Bucket server-side encryption
+resource "aws_s3_bucket_server_side_encryption_configuration" "sse" {
+  bucket = aws_s3_bucket.bucket.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = var.kms_key_arn != null ? "aws:kms" : "AES256"
+      kms_master_key_id = var.kms_key_arn
+    }
+    bucket_key_enabled = var.kms_key_arn != null ? true : null
+  }
+}
+
+# Bucket lifecycle configuration
+resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
+  bucket = aws_s3_bucket.bucket.id
+
+  rule {
+    id     = "abort-incomplete-multipart-upload"
+    status = "Enabled"
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = var.abort_incomplete_multipart_upload_days
+    }
+
+    dynamic "expiration" {
+      for_each = var.expiration_days > 0 ? [1] : []
+      content {
+        days = var.expiration_days
+      }
+    }
+  }
+}
+
+# Bucket versioning configuration
+resource "aws_s3_bucket_versioning" "versioning" {
+  bucket = aws_s3_bucket.bucket.id
+  versioning_configuration {
+    status = var.versioning_enabled == true || var.versioning_enabled == "Enabled" ? "Enabled" : "Suspended"
+  }
+}
+
+# Bucket cors configuration
+resource "aws_s3_bucket_cors_configuration" "cors" {
+  count  = length(var.cors) > 0 ? 1 : 0
+  bucket = aws_s3_bucket.bucket.id
+
+  dynamic "cors_rule" {
+    for_each = var.cors
+    content {
+      allowed_headers = cors_rule.value["allowed_headers"]
+      allowed_methods = cors_rule.value["allowed_methods"]
+      allowed_origins = cors_rule.value["allowed_origins"]
+      max_age_seconds = cors_rule.value["max_age_seconds"]
+    }
+  }
+}
+
+# Bucket policy
+resource "aws_s3_bucket_policy" "bucket_policy" {
+  count  = var.bucket_policy != "" ? 1 : 0
+  bucket = aws_s3_bucket.bucket.id
+  policy = var.bucket_policy
+}
+
+# Specifying bucket notification configuration
+resource "aws_s3_bucket_notification" "bucket_notification" {
+  count  = (length(var.bucket_notification.queue) > 0 || length(var.bucket_notification.lambda_function) > 0) ? 1 : 0
+  bucket = aws_s3_bucket.bucket.bucket
+
+  dynamic "queue" {
+    for_each = var.bucket_notification.queue
+    content {
+      queue_arn = queue.value["queue_arn"]
+      events    = queue.value["events"]
+    }
+  }
+  dynamic "lambda_function" {
+    for_each = var.bucket_notification.lambda_function
+    content {
+      lambda_function_arn = lambda_function.value["lambda_function_arn"]
+      events              = lambda_function.value["events"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "public_access_block" {
+  bucket = aws_s3_bucket.bucket.id
+
+  block_public_acls       = var.block_public_acls
+  block_public_policy     = var.block_public_policy
+  ignore_public_acls      = var.ignore_public_acls
+  restrict_public_buckets = var.restrict_public_buckets
+}
