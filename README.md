@@ -99,6 +99,18 @@ This repository provides a modular, production-ready **Terraform** configuration
         │   ├── main.tf
         │   ├── variables.tf
         │   └── outputs.tf
+        ├── kms/                        # Reusable KMS key and alias module
+        │   ├── main.tf
+        │   ├── variables.tf
+        │   └── outputs.tf
+        ├── secrets-manager/            # Reusable Secrets Manager secret and version module
+        │   ├── main.tf
+        │   ├── variables.tf
+        │   └── outputs.tf
+        ├── security-groups/            # Reusable dynamic security group module
+        │   ├── main.tf
+        │   ├── variables.tf
+        │   └── outputs.tf
         └── iam/                        # Reusable IAM role and policy module
             ├── main.tf
             ├── variables.tf

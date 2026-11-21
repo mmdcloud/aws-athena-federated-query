@@ -22,58 +22,17 @@ locals {
 }
 
 # ------------------------------------------------------------------------------
-# 1. Encryption: AWS KMS Customer Managed Key (CMK)
+# 1. Encryption: AWS KMS via Reusable KMS Module
 # ------------------------------------------------------------------------------
-resource "aws_kms_key" "athena" {
+module "kms" {
+  source = "./modules/kms"
+
+  name                    = "${local.name_prefix}-athena-key"
   description             = "KMS Key for Athena Federated Query results, S3 spill, RDS, and Secrets"
   deletion_window_in_days = 30
   enable_key_rotation     = true
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "EnableRootPermissions"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${local.account_id}:root"
-        }
-        Action   = "kms:*"
-        Resource = "*"
-      },
-      {
-        Sid    = "AllowAthenaAndLambdaAccess"
-        Effect = "Allow"
-        Principal = {
-          Service = [
-            "athena.amazonaws.com",
-            "lambda.amazonaws.com",
-            "secretsmanager.amazonaws.com",
-            "rds.amazonaws.com",
-            "logs.${local.region}.amazonaws.com"
-          ]
-        }
-        Action = [
-          "kms:Decrypt",
-          "kms:GenerateDataKey*",
-          "kms:DescribeKey"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-
-  tags = merge(
-    {
-      Name = "${local.name_prefix}-kms-key"
-    },
-    local.common_tags
-  )
-}
-
-resource "aws_kms_alias" "athena" {
-  name          = "alias/${local.name_prefix}-athena-key"
-  target_key_id = aws_kms_key.athena.key_id
+  tags = local.common_tags
 }
 
 # ------------------------------------------------------------------------------
@@ -109,7 +68,7 @@ module "s3_query_results" {
   bucket_name                            = "${local.name_prefix}-query-results-${local.account_id}"
   force_destroy                          = true
   versioning_enabled                     = "Enabled"
-  kms_key_arn                            = aws_kms_key.athena.arn
+  kms_key_arn                            = module.kms.arn
   expiration_days                        = var.query_results_retention_days
   abort_incomplete_multipart_upload_days = 7
 
@@ -128,7 +87,7 @@ module "s3_spill" {
   bucket_name                            = "${local.name_prefix}-spill-${local.account_id}"
   force_destroy                          = true
   versioning_enabled                     = "Enabled"
-  kms_key_arn                            = aws_kms_key.athena.arn
+  kms_key_arn                            = module.kms.arn
   expiration_days                        = var.spill_bucket_retention_days
   abort_incomplete_multipart_upload_days = 1
 
@@ -147,7 +106,7 @@ module "s3_data_lake" {
   bucket_name                            = "${local.name_prefix}-data-lake-${local.account_id}"
   force_destroy                          = true
   versioning_enabled                     = "Enabled"
-  kms_key_arn                            = aws_kms_key.athena.arn
+  kms_key_arn                            = module.kms.arn
   expiration_days                        = 0
   abort_incomplete_multipart_upload_days = 7
 
@@ -184,7 +143,7 @@ module "dynamodb" {
   ]
   pitr_enabled                   = true
   server_side_encryption_enabled = true
-  kms_key_arn                    = aws_kms_key.athena.arn
+  kms_key_arn                    = module.kms.arn
 
   tags = merge(
     {
@@ -235,7 +194,7 @@ resource "aws_dynamodb_table_item" "sample_customer_3" {
 }
 
 # ------------------------------------------------------------------------------
-# 5. Data Source 2: Amazon RDS Instance via Reusable RDS Module
+# 5. Data Source 2: Amazon RDS Instance via Reusable Modules
 # ------------------------------------------------------------------------------
 
 # Random master password for RDS
@@ -245,18 +204,15 @@ resource "random_password" "rds_password" {
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
-# Store database credentials in AWS Secrets Manager (Used by Athena RDS connector)
-resource "aws_secretsmanager_secret" "rds_credentials" {
+# 5a. Store database credentials via Reusable Secrets Manager Module
+module "secrets_manager" {
+  source = "./modules/secrets-manager"
+
   name                    = "${local.name_prefix}-rds-credentials"
   description             = "Database connection credentials for Athena RDS Federated Connector"
-  kms_key_id              = aws_kms_key.athena.arn
   recovery_window_in_days = 0
+  kms_key_id              = module.kms.arn
 
-  tags = local.common_tags
-}
-
-resource "aws_secretsmanager_secret_version" "rds_credentials" {
-  secret_id = aws_secretsmanager_secret.rds_credentials.id
   secret_string = jsonencode({
     engine              = var.rds_engine
     host                = module.rds.address
@@ -266,68 +222,74 @@ resource "aws_secretsmanager_secret_version" "rds_credentials" {
     database            = var.rds_db_name
     dbClusterIdentifier = module.rds.id
   })
+
+  tags = local.common_tags
 }
 
-# Security Group for Athena RDS Lambda Connector
-resource "aws_security_group" "rds_connector" {
+# 5b. Security Group for Athena RDS Lambda Connector via Reusable Security Group Module
+module "rds_connector_sg" {
+  source = "./modules/security-groups"
+
   name        = "${local.name_prefix}-rds-connector-sg"
   description = "Security group for Athena RDS Federated Query Lambda connector"
   vpc_id      = module.vpc.vpc_id
 
-  egress {
-    description = "Allow outbound to RDS PostgreSQL port"
-    from_port   = 5432
-    to_port     = 5432
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
-
-  egress {
-    description = "Allow HTTPS outbound for AWS APIs via Gateway/Interface Endpoints"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = merge(
+  ingress_rules = []
+  egress_rules = [
     {
-      Name = "${local.name_prefix}-rds-connector-sg"
+      description     = "Allow outbound to RDS PostgreSQL port within VPC"
+      from_port       = 5432
+      to_port         = 5432
+      protocol        = "tcp"
+      cidr_blocks     = [var.vpc_cidr]
+      security_groups = null
     },
-    local.common_tags
-  )
+    {
+      description     = "Allow HTTPS outbound for AWS APIs via Gateway/Interface Endpoints"
+      from_port       = 443
+      to_port         = 443
+      protocol        = "tcp"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = null
+    }
+  ]
+
+  tags = local.common_tags
 }
 
-# Security Group for RDS Instance
-resource "aws_security_group" "rds" {
+# 5c. Security Group for RDS Instance via Reusable Security Group Module
+module "rds_sg" {
+  source = "./modules/security-groups"
+
   name        = "${local.name_prefix}-rds-db-sg"
   description = "Security group for RDS PostgreSQL database"
   vpc_id      = module.vpc.vpc_id
 
-  ingress {
-    description     = "Allow database connections from Athena RDS Connector Lambda"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.rds_connector.id]
-  }
-
-  egress {
-    description = "Allow outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = merge(
+  ingress_rules = [
     {
-      Name = "${local.name_prefix}-rds-db-sg"
-    },
-    local.common_tags
-  )
+      description     = "Allow database connections from Athena RDS Connector Lambda"
+      from_port       = 5432
+      to_port         = 5432
+      protocol        = "tcp"
+      security_groups = [module.rds_connector_sg.id]
+      cidr_blocks     = null
+    }
+  ]
+  egress_rules = [
+    {
+      description     = "Allow all outbound traffic"
+      from_port       = 0
+      to_port         = 0
+      protocol        = "-1"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = null
+    }
+  ]
+
+  tags = local.common_tags
 }
 
+# 5d. RDS Database Instance via Reusable RDS Module
 module "rds" {
   source = "./modules/rds"
 
@@ -340,7 +302,7 @@ module "rds" {
   max_allocated_storage   = var.rds_max_allocated_storage
   storage_type            = "gp3"
   storage_encrypted       = true
-  kms_key_id              = aws_kms_key.athena.arn
+  kms_key_id              = module.kms.arn
   username                = var.rds_master_username
   password                = random_password.rds_password.result
   multi_az                = false
@@ -351,7 +313,7 @@ module "rds" {
 
   subnet_group_name      = "${local.name_prefix}-rds-subnet-group"
   subnet_group_ids       = module.vpc.private_subnets
-  vpc_security_group_ids = [aws_security_group.rds.id]
+  vpc_security_group_ids = [module.rds_sg.id]
 
   parameter_group_name   = "${local.name_prefix}-pg"
   parameter_group_family = "postgres16"
@@ -391,7 +353,7 @@ module "dynamodb_connector" {
   spill_bucket_name        = module.s3_spill.bucket
   spill_prefix             = "athena-spill/dynamodb/"
   disable_spill_encryption = false
-  kms_key_arn              = aws_kms_key.athena.arn
+  kms_key_arn              = module.kms.arn
   lambda_memory_size       = 3008
   lambda_timeout           = 900
   lambda_handler           = "lambda_function.lambda_handler"
@@ -417,23 +379,23 @@ module "rds_connector" {
   spill_bucket_name           = module.s3_spill.bucket
   spill_prefix                = "athena-spill/rds/"
   disable_spill_encryption    = false
-  kms_key_arn                 = aws_kms_key.athena.arn
+  kms_key_arn                 = module.kms.arn
   lambda_memory_size          = 3008
   lambda_timeout              = 900
   lambda_handler              = "lambda_function.lambda_handler"
   lambda_runtime              = "python3.12"
   lambda_package_path         = data.archive_file.rds_connector_pkg.output_path
-  secrets_manager_secret_arns = [aws_secretsmanager_secret.rds_credentials.arn]
+  secrets_manager_secret_arns = [module.secrets_manager.arn]
   log_retention_days          = 30
 
   # VPC Configuration for RDS private access
   vpc_config = {
     subnet_ids         = module.vpc.private_subnets
-    security_group_ids = [aws_security_group.rds_connector.id]
+    security_group_ids = [module.rds_connector_sg.id]
   }
 
   environment_variables = {
-    default = "postgres://jdbc:postgresql://${module.rds.endpoint}/${var.rds_db_name}?${aws_secretsmanager_secret.rds_credentials.name}"
+    default = "postgres://jdbc:postgresql://${module.rds.endpoint}/${var.rds_db_name}?${module.secrets_manager.name}"
   }
 
   tags = merge(
@@ -453,7 +415,7 @@ module "athena" {
   workgroup_name                     = "${local.name_prefix}-${var.athena_workgroup_name}"
   workgroup_description              = "Production Athena Workgroup for cross-source federated queries"
   query_results_bucket_name          = module.s3_query_results.bucket
-  kms_key_arn                        = aws_kms_key.athena.arn
+  kms_key_arn                        = module.kms.arn
   enforce_workgroup_configuration    = true
   publish_cloudwatch_metrics_enabled = true
   force_destroy                      = true

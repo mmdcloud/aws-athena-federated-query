@@ -21,12 +21,12 @@ output "athena_workgroup_name" {
 # KMS Outputs
 output "kms_key_arn" {
   description = "ARN of the centralized KMS Customer Managed Key (CMK)"
-  value       = aws_kms_key.athena.arn
+  value       = module.kms.arn
 }
 
 output "kms_key_alias" {
   description = "Alias name for the KMS Key"
-  value       = aws_kms_alias.athena.name
+  value       = module.kms.alias_name
 }
 
 # S3 Buckets Outputs
@@ -89,7 +89,7 @@ output "rds_database_name" {
 
 output "rds_credentials_secret_arn" {
   description = "ARN of the Secrets Manager secret storing RDS connection credentials"
-  value       = aws_secretsmanager_secret.rds_credentials.arn
+  value       = module.secrets_manager.arn
 }
 
 output "rds_connector_lambda_arn" {
