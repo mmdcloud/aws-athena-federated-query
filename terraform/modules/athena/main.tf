@@ -17,7 +17,7 @@ resource "aws_athena_workgroup" "primary" {
 
       encryption_configuration {
         encryption_option = var.kms_key_arn != null ? "SSE_KMS" : "SSE_S3"
-        kms_key           = var.kms_key_arn
+        kms_key_arn       = var.kms_key_arn
       }
     }
   }
@@ -34,7 +34,7 @@ resource "aws_athena_workgroup" "primary" {
 # Athena Federated Data Catalog - DynamoDB
 # ------------------------------------------------------------------------------
 resource "aws_athena_data_catalog" "dynamodb" {
-  count       = var.dynamodb_connector_lambda_arn != null ? 1 : 0
+  count       = var.enable_dynamodb_catalog ? 1 : 0
   name        = var.dynamodb_catalog_name
   description = "Athena Federated Query connector for Amazon DynamoDB"
   type        = "LAMBDA"
@@ -55,7 +55,7 @@ resource "aws_athena_data_catalog" "dynamodb" {
 # Athena Federated Data Catalog - RDS
 # ------------------------------------------------------------------------------
 resource "aws_athena_data_catalog" "rds" {
-  count       = var.rds_connector_lambda_arn != null ? 1 : 0
+  count       = var.enable_rds_catalog ? 1 : 0
   name        = var.rds_catalog_name
   description = "Athena Federated Query connector for Amazon RDS"
   type        = "LAMBDA"
@@ -82,7 +82,7 @@ resource "aws_glue_catalog_database" "s3_database" {
 }
 
 resource "aws_glue_catalog_table" "s3_orders" {
-  count         = var.enable_s3_glue_catalog && var.s3_data_bucket_name != null ? 1 : 0
+  count         = var.enable_s3_glue_catalog ? 1 : 0
   database_name = aws_glue_catalog_database.s3_database[0].name
   name          = var.s3_table_name
   description   = "S3 external table for ecommerce orders"
@@ -138,7 +138,7 @@ resource "aws_glue_catalog_table" "s3_orders" {
 
 # 1. 3-Way Federated Join: S3 + DynamoDB + RDS
 resource "aws_athena_named_query" "federated_cross_source_join" {
-  count       = var.create_sample_queries ? 1 : 0
+  count       = var.create_sample_queries && var.enable_dynamodb_catalog && var.enable_rds_catalog && var.enable_s3_glue_catalog ? 1 : 0
   name        = "federated_cross_source_join"
   workgroup   = aws_athena_workgroup.primary.id
   database    = var.enable_s3_glue_catalog ? aws_glue_catalog_database.s3_database[0].name : "default"
@@ -174,7 +174,7 @@ resource "aws_athena_named_query" "federated_cross_source_join" {
 
 # 2. DynamoDB Direct Federated Query
 resource "aws_athena_named_query" "dynamodb_direct_query" {
-  count       = var.create_sample_queries && var.dynamodb_connector_lambda_arn != null ? 1 : 0
+  count       = var.create_sample_queries && var.enable_dynamodb_catalog ? 1 : 0
   name        = "dynamodb_direct_query"
   workgroup   = aws_athena_workgroup.primary.id
   database    = "default"
@@ -194,7 +194,7 @@ resource "aws_athena_named_query" "dynamodb_direct_query" {
 
 # 3. RDS Direct Federated Query
 resource "aws_athena_named_query" "rds_direct_query" {
-  count       = var.create_sample_queries && var.rds_connector_lambda_arn != null ? 1 : 0
+  count       = var.create_sample_queries && var.enable_rds_catalog ? 1 : 0
   name        = "rds_direct_query"
   workgroup   = aws_athena_workgroup.primary.id
   database    = "default"

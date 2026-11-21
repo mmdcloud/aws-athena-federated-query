@@ -32,6 +32,12 @@ variable "kms_key_arn" {
   default     = null
 }
 
+variable "log_group_kms_key_arn" {
+  description = "KMS Key ARN specifically configured with CloudWatch service policy (leave null for standard CloudWatch encryption)"
+  type        = string
+  default     = null
+}
+
 variable "lambda_handler" {
   description = "Lambda function handler"
   type        = string

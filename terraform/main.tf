@@ -421,11 +421,13 @@ module "athena" {
   force_destroy                      = true
 
   # Register DynamoDB Data Catalog
+  enable_dynamodb_catalog       = true
   dynamodb_connector_lambda_arn = module.dynamodb_connector.lambda_arn
   dynamodb_catalog_name         = var.dynamodb_catalog_name
   dynamodb_table_name           = module.dynamodb.name
 
   # Register RDS Data Catalog
+  enable_rds_catalog       = true
   rds_connector_lambda_arn = module.rds_connector.lambda_arn
   rds_catalog_name         = var.rds_catalog_name
   rds_db_name              = "public"

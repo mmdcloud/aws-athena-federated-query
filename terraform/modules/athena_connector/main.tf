@@ -9,7 +9,7 @@ data "archive_file" "default_package" {
 resource "aws_cloudwatch_log_group" "connector" {
   name              = "/aws/lambda/${var.connector_name}"
   retention_in_days = var.log_retention_days
-  kms_key_id        = var.kms_key_arn
+  kms_key_id        = var.log_group_kms_key_arn
 
   tags = merge(
     {

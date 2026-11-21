@@ -8,7 +8,7 @@ resource "aws_db_instance" "db" {
   final_snapshot_identifier             = var.final_snapshot_identifier
   maintenance_window                    = var.maintenance_window
   kms_key_id                            = var.kms_key_id
-  performance_insights_kms_key_id       = var.performance_insights_kms_key_id
+  performance_insights_kms_key_id       = var.performance_insights_enabled ? var.performance_insights_kms_key_id : null
   storage_encrypted                     = var.storage_encrypted
   engine                                = var.engine
   engine_version                        = var.engine_version
@@ -20,7 +20,7 @@ resource "aws_db_instance" "db" {
   password                              = var.password
   max_allocated_storage                 = var.max_allocated_storage
   performance_insights_enabled          = var.performance_insights_enabled
-  performance_insights_retention_period = var.performance_insights_retention_period
+  performance_insights_retention_period = var.performance_insights_enabled ? var.performance_insights_retention_period : null
   monitoring_interval                   = var.monitoring_interval
   monitoring_role_arn                   = var.monitoring_role_arn
   parameter_group_name                  = aws_db_parameter_group.parameter_group.name

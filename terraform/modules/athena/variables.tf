@@ -45,6 +45,12 @@ variable "force_destroy" {
 }
 
 # DynamoDB Connector Integration
+variable "enable_dynamodb_catalog" {
+  description = "Whether to register the DynamoDB data catalog in Athena"
+  type        = bool
+  default     = true
+}
+
 variable "dynamodb_connector_lambda_arn" {
   description = "Lambda ARN for the DynamoDB connector"
   type        = string
@@ -64,6 +70,12 @@ variable "dynamodb_table_name" {
 }
 
 # RDS Connector Integration
+variable "enable_rds_catalog" {
+  description = "Whether to register the RDS data catalog in Athena"
+  type        = bool
+  default     = true
+}
+
 variable "rds_connector_lambda_arn" {
   description = "Lambda ARN for the RDS connector"
   type        = string

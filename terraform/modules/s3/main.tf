@@ -16,7 +16,7 @@ resource "aws_s3_object" "object" {
   bucket                 = aws_s3_bucket.bucket.id
   source                 = var.objects[count.index].source
   key                    = var.objects[count.index].key
-  etag                   = filemd5(var.objects[count.index].source)
+  source_hash            = filemd5(var.objects[count.index].source)
   server_side_encryption = var.kms_key_arn != null ? "aws:kms" : "AES256"
   kms_key_id             = var.kms_key_arn
 }
@@ -41,6 +41,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
   rule {
     id     = "abort-incomplete-multipart-upload"
     status = "Enabled"
+
+    filter {
+      prefix = ""
+    }
 
     abort_incomplete_multipart_upload {
       days_after_initiation = var.abort_incomplete_multipart_upload_days
